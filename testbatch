@@ -1,0 +1,114 @@
+package com.example.demo;
+
+import java.io.File;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.time.format.DateTimeFormatter;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+import java.util.HashMap;
+import java.util.TimeZone;
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.item.data.MongoItemReader;
+import org.springframework.batch.item.file.FlatFileItemWriter;
+import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
+import org.springframework.batch.item.file.transform.DelimitedLineAggregator;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Sort.Direction;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+
+@Configuration
+@EnableBatchProcessing
+public class MongoToCSVFile  {
+
+  @Autowired
+  private JobBuilderFactory jobBuilderFactory;
+  @Autowired
+  private StepBuilderFactory stepBuilderFactory;
+
+  @Autowired
+  private MongoTemplate mongoTemplate;
+
+  @Bean
+  public Job readReport() throws Exception {
+    return jobBuilderFactory.get("readReport").flow(step1()).end().build();
+  }
+
+  @Bean
+  public Step step1() throws Exception {
+    return stepBuilderFactory.get("step1").<Person, Person>chunk(10).reader(reader())
+        .writer(writer()).build();
+  }
+
+
+  @Bean
+  public MongoItemReader<Person> reader() {
+    MongoItemReader<Person> reader = new MongoItemReader<>();
+    reader.setTemplate(mongoTemplate);
+    reader.setSort(new HashMap<String, Sort.Direction>() {{
+      put("_id", Direction.DESC);
+    }});
+    reader.setTargetType(Person.class);
+    DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    SimpleDateFormat formatter1 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.000'Z'");
+    formatter1.format(new Date());
+    TimeZone tz = TimeZone.getTimeZone("UTC");
+    DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
+    df.setTimeZone(tz);
+    String nowAsISO = df.format(new Date());
+//    DateUtils.addDays(new Date(),-3);
+    Query query=new Query();
+	query.addCriteria(Criteria.where("age").lte("40"));
+	long millis=System.currentTimeMillis();  
+	java.util.Date date=new java.util.Date(millis);
+//	query.addCriteria(Criteria.where("dob").lte(date));
+	
+	GregorianCalendar gc = new GregorianCalendar();
+	gc.setTime(date);
+	gc.add(Calendar.DAY_OF_YEAR, -3);
+	Date result = gc.getTime();
+	query.addCriteria(Criteria.where("dob").lte(result));
+    reader.setQuery(query);
+    return reader;
+  }
+
+  @Bean
+  public FlatFileItemWriter<Person> writer() 
+  {
+      //Create writer instance
+      FlatFileItemWriter<Person> writer = new FlatFileItemWriter<>();
+      File f=new File("E:/outputData.txt");
+  Resource outputResource = new FileSystemResource(f);
+      //Set output file location
+      writer.setResource(outputResource);
+       
+      //All job repetitions should "append" to same output file
+      writer.setAppendAllowed(true);
+       
+      //Name field values sequence based on object properties 
+      writer.setLineAggregator(new DelimitedLineAggregator<Person>() {
+          {
+              setDelimiter(",");
+              setFieldExtractor(new BeanWrapperFieldExtractor<Person>() {
+                  {
+                      setNames(new String[] { "id", "firstName", "lastName" });
+                  }
+              });
+          }
+      });
+      return writer;
+  }
+}
